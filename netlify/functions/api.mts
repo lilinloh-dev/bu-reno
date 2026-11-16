@@ -139,12 +139,18 @@ export default async (req: Request) => {
     if (route === "POST import") {
       const b = (await req.json()) as { home?: Record<string, unknown>; collections?: Record<string, db.Item[]> };
       if (b.home) await db.patchHome(b.home);
+      // Report what was actually saved so the app never claims an import that didn't happen.
+      let saved = 0, skipped = 0;
       for (const [col, items] of Object.entries(b.collections || {})) {
-        if (!db.isCollection(col) || !Array.isArray(items)) continue;
+        if (!Array.isArray(items)) continue;
+        if (!db.isCollection(col)) { skipped += items.length; continue; }
         // Adds and updates only; nothing already in the app is deleted.
-        await Promise.all(items.filter((i) => db.validId(i?.id)).map((i) => db.upsert(col, i)));
+        const ok = items.filter((i) => db.validId(i?.id));
+        await Promise.all(ok.map((i) => db.upsert(col, i)));
+        saved += ok.length;
+        skipped += items.length - ok.length;
       }
-      return json({ ok: true });
+      return json({ ok: true, saved, skipped });
     }
 
     return fail(404, "Not found");

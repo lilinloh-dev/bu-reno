@@ -81,6 +81,7 @@ function ContactForm({ contact, onClose }: { contact: Contact; onClose: () => vo
 function Backup() {
   const app = useApp();
   const [busy, setBusy] = useState("");
+  const [result, setResult] = useState("");
   const file = useRef<HTMLInputElement>(null);
 
   const toB64 = (blob: Blob) => new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.readAsDataURL(blob); });
@@ -115,6 +116,7 @@ function Backup() {
 
   const importFile = async (f?: File) => {
     if (!f) return;
+    setResult("");
     try {
       const data = JSON.parse(await f.text());
       if (!data.collections && !data.home) throw new Error("That file isn't a Reno HQ backup");
@@ -125,10 +127,22 @@ function Backup() {
         const bytes = Uint8Array.from(atob(img.data), (c) => c.charCodeAt(0));
         await uploadImage(new Blob([bytes], { type: img.type }), id);
       }
-      setBusy("Saving…");
-      await api("/api/import", { method: "POST", body: JSON.stringify({ home: data.home, collections: data.collections }) });
+      // Small batches, so a big file can't run into the server's time or size limits part-way.
+      const all = Object.entries((data.collections || {}) as Record<string, unknown[]>)
+        .flatMap(([col, items]) => (Array.isArray(items) ? items.map((item) => ({ col, item })) : []));
+      let saved = 0, skipped = 0;
+      for (let i = 0; i < all.length || i === 0; i += 20) {
+        setBusy(all.length ? `Saving ${Math.min(i + 20, all.length)} of ${all.length}…` : "Saving…");
+        const collections: Record<string, unknown[]> = {};
+        for (const { col, item } of all.slice(i, i + 20)) (collections[col] ||= []).push(item);
+        const r = await api<{ saved: number; skipped: number }>("/api/import", { method: "POST", body: JSON.stringify({ home: i === 0 ? data.home : undefined, collections }) });
+        saved += r.saved;
+        skipped += r.skipped;
+      }
       await load();
+      setResult(`Imported ${saved} item${saved === 1 ? "" : "s"}${data.home ? " and the home details" : ""}.${skipped ? ` ${skipped} could not be read and were skipped.` : ""}`);
     } catch (e) {
+      setResult("The import stopped before it finished. Nothing was removed; it is safe to import the same file again.");
       reportError(e instanceof Error ? e.message : "Import failed");
     } finally {
       setBusy("");
@@ -145,6 +159,7 @@ function Backup() {
         <button disabled={!!busy} onClick={() => file.current?.click()}>Import file…</button>
         {busy && <span className="muted"><span className="spinner" /> {busy}</span>}
       </div>
+      {result && <p className="callout" role="status">{result}</p>}
       <input ref={file} type="file" accept="application/json,.json" hidden onChange={(e) => importFile(e.target.files?.[0])} />
     </div>
   );
