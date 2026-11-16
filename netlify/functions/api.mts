@@ -25,13 +25,28 @@ export default async (req: Request) => {
     if (route === "GET config") return json(auth.publicConfig());
     if (req.method === "POST" && parts[0] === "auth") {
       if (parts[1] === "google") {
-        const { credential } = (await req.json()) as { credential?: string };
-        if (!credential) return fail(400, "Missing credential");
+        // Google posts here as a full-page redirect (ux_mode "redirect"), which works where its
+        // pop-up flow doesn't: iPhone home-screen apps and in-app browsers end on a blank page.
+        const back = (error?: string, cookie?: string) =>
+          new Response(null, {
+            status: 303,
+            headers: {
+              Location: error ? `/?signin_error=${encodeURIComponent(error)}` : "/",
+              "Cache-Control": "no-store",
+              ...(cookie ? { "Set-Cookie": cookie } : {}),
+            },
+          });
+        const form = new URLSearchParams(await req.text());
+        const credential = form.get("credential");
+        if (!credential) return back("Google didn't send a sign-in. Please try again.");
+        // Double-submit check: Google's script sets this cookie on our site and echoes it in the form.
+        const csrf = form.get("g_csrf_token");
+        const csrfCookie = (req.headers.get("cookie") || "").match(/(?:^|;\s*)g_csrf_token=([^;]+)/)?.[1];
+        if (!csrf || csrf !== csrfCookie) return back("Sign-in check failed. Please try again.");
         try {
-          const user = await auth.verifyGoogle(credential);
-          return json({ user }, 200, { "Set-Cookie": auth.sessionCookie(user) });
+          return back(undefined, auth.sessionCookie(await auth.verifyGoogle(credential)));
         } catch (e) {
-          return fail(403, e instanceof Error ? e.message : "Sign-in failed");
+          return back(e instanceof Error ? e.message : "Sign-in failed");
         }
       }
       if (parts[1] === "dev") {

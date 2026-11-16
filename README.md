@@ -24,6 +24,9 @@ Your data lives in Netlify's storage for the site. Nothing personal is kept in t
    - Go to <https://console.cloud.google.com/apis/credentials> → **Create credentials → OAuth client ID**
      → type **Web application**.
    - Under **Authorised JavaScript origins** add your site address, e.g. `https://your-site.netlify.app`.
+   - Under **Authorised redirect URIs** add the same address followed by `/api/auth/google`, e.g.
+     `https://your-site.netlify.app/api/auth/google`. (Sign-in is a full-page redirect, because
+     Google's pop-up ends on a blank page on iPhone.)
    - Copy the **Client ID**.
 3. In Netlify: **Site configuration → Environment variables**, add:
 

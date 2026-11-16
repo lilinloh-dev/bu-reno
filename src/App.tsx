@@ -21,9 +21,10 @@ const TABS = [
 
 function SignIn({ onDone }: { onDone: () => void }) {
   const [cfg, setCfg] = useState<Config | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() => new URLSearchParams(location.search).get("signin_error") || "");
   const btn = useRef<HTMLDivElement>(null);
 
+  useEffect(() => { if (location.search.includes("signin_error")) history.replaceState(null, "", location.pathname + location.hash); }, []);
   useEffect(() => { api<Config>("/api/config").then(setCfg).catch((e) => setError(e.message)); }, []);
   useEffect(() => {
     if (!cfg?.googleClientId) return;
@@ -31,22 +32,19 @@ function SignIn({ onDone }: { onDone: () => void }) {
     s.src = "https://accounts.google.com/gsi/client";
     s.async = true;
     s.onload = () => {
+      // Full-page redirect rather than Google's pop-up: the pop-up can't report back to the app on
+      // iPhone (home-screen app, in-app browsers) and leaves a blank page. The server sets the
+      // session cookie and sends the browser back here.
       window.google!.accounts.id.initialize({
         client_id: cfg.googleClientId,
-        callback: async (r: { credential: string }) => {
-          try {
-            await api("/api/auth/google", { method: "POST", body: JSON.stringify({ credential: r.credential }) });
-            onDone();
-          } catch (e) {
-            setError(e instanceof Error ? e.message : "Sign-in failed");
-          }
-        },
+        ux_mode: "redirect",
+        login_uri: `${location.origin}/api/auth/google`,
       });
       if (btn.current) window.google!.accounts.id.renderButton(btn.current, { theme: "outline", size: "large", shape: "pill", text: "signin_with" });
     };
     document.head.appendChild(s);
     return () => s.remove();
-  }, [cfg?.googleClientId, onDone]);
+  }, [cfg?.googleClientId]);
 
   return (
     <main className="signin">
